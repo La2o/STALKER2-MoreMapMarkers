@@ -1,0 +1,31 @@
+[size=5][b]More Map Markers[/b][/size]
+
+Raises the limit on custom markers you can place on the PDA map. The vanilla game only allows [b]10[/b].
+
+Made for the [url=https://forums.nexusmods.com/topic/13502974-mod-request-stalker-2-more-player-markers-on-map/]mod request on the Nexus forums[/url], so you can tag every artifact anomaly, stash and point of interest you come across.
+
+[size=4][b]Versions[/b][/size]
+Pick [b]one[/b]:
+[list]
+[*][b]50[/b] markers
+[*][b]99[/b] markers [i](recommended: still fits the PDA's marker counter)[/i]
+[*][b]999[/b] markers
+[/list]
+Need a different number? The [url=https://github.com/la2o/stalker2-moremapmarkers]source repository[/url] has a script that builds any limit from your own game files.
+
+[size=4][b]Installation[/b][/size]
+[b]Manual:[/b] extract the archive into your game folder (the one that contains [font=Courier New]Stalker2[/font]). You should end up with three files ([font=Courier New].pak[/font], [font=Courier New].utoc[/font] and [font=Courier New].ucas[/font]) in:
+[code]Stalker2/Content/Paks/~mods/[/code]
+[b]Uninstall:[/b] delete those three files.
+
+Only install one version at a time.
+
+[size=4][b]Compatibility[/b][/size]
+[list]
+[*]Overrides [font=Courier New]/Game/GameLite/FPS_Game/UIRemaster/PDA/WorldMap/MapSettingsAsset[/font]. Any other mod that changes this asset (including other marker limit mods) will conflict with this one.
+[*]No [font=Courier New].cfg[/font] files are touched, so it works alongside config mods.
+[*]If a game patch changes the map settings asset, this mod may need a rebuild.
+[/list]
+
+[size=4][b]How it works[/b][/size]
+The marker limit isn't a config value. It's an integer stored on the PDA map settings asset. This mod repacks that asset from the game with the new limit, using a packer written from scratch ([url=https://github.com/la2o/stalker2-moremapmarkers]source[/url]).
