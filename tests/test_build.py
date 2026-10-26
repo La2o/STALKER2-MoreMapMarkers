@@ -37,15 +37,16 @@ class BuildTest(unittest.TestCase):
 
             source = build.find_asset([os.path.join(tmp, "game.utoc")])
             self.assertIsNotNone(source)
-            build.build(99, source, os.path.join(tmp, "out"), "Mod_P")
+            with source[0]:
+                build.build(99, source, os.path.join(tmp, "out"), "Mod_P")
 
             out = os.path.join(tmp, "out", "Mod_P.utoc")
             verify.main(out)
-            c = Container(out)
-            self.assertEqual(c.chunk_ids.count(cid), 1)
-            pkg = c.read_chunk(c.index[cid])
-            self.assertEqual(pkg, fake_package(99))
-            self.assertEqual(c.container_header()["entries"][0x8AB7D5BAF8A7251E], entry)
+            with Container(out) as c:
+                self.assertEqual(c.chunk_ids.count(cid), 1)
+                pkg = c.read_chunk(c.index[cid])
+                self.assertEqual(pkg, fake_package(99))
+                self.assertEqual(c.container_header()["entries"][0x8AB7D5BAF8A7251E], entry)
 
     def test_rejects_unexpected_value(self):
         with self.assertRaises(SystemExit):

@@ -16,7 +16,8 @@ from iostore import CHUNK_EXPORT_BUNDLE_DATA, Container, Reader, hash_chunk_id  
 
 
 def seeds(c):
-    toc = open(c.path, "rb").read()
+    with open(c.path, "rb") as f:
+        toc = f.read()
     n = struct.unpack_from("<I", toc, 0x54)[0]
     start = 0x90 + 22 * len(c.chunk_ids)
     return [struct.unpack_from("<i", toc, start + 4 * i)[0] for i in range(n)]
@@ -31,7 +32,17 @@ def lookup(c, s, cid):
 
 
 def main(utoc):
-    c = Container(utoc)
+    with Container(utoc) as c:
+        check(c)
+
+    with open(utoc[:-5] + ".pak", "rb") as f:
+        pak = f.read()
+    r = Reader(pak, len(pak) - 160 - 20 - 8 - 8 - 4 - 4)
+    assert r.u32() == 0x5A6F12E1 and r.u32() == 11, "bad .pak footer"
+    print(".pak footer OK")
+
+
+def check(c):
     s = seeds(c)
     for i, cid in enumerate(c.chunk_ids):
         assert lookup(c, s, cid) == i, f"chunk {i} not reachable via perfect hash"
@@ -49,11 +60,6 @@ def main(utoc):
         pkg = c.read_chunk(entry)
         limit = struct.unpack_from("<i", pkg, struct.unpack_from("<I", pkg, 4)[0] + LIMIT_EXPORT_OFFSET)[0]
         print(f"{path}: marker limit = {limit}")
-
-    pak = open(utoc[:-5] + ".pak", "rb").read()
-    r = Reader(pak, len(pak) - 160 - 20 - 8 - 8 - 4 - 4)
-    assert r.u32() == 0x5A6F12E1 and r.u32() == 11, "bad .pak footer"
-    print(".pak footer OK")
 
 
 if __name__ == "__main__":

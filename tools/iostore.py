@@ -106,7 +106,8 @@ class Container:
 
     def __init__(self, utoc_path):
         self.path = utoc_path
-        toc = open(utoc_path, "rb").read()
+        with open(utoc_path, "rb") as f:
+            toc = f.read()
         r = Reader(toc)
         if r.take(16) != TOC_MAGIC:
             raise ValueError(f"{utoc_path}: not a .utoc file")
@@ -153,6 +154,17 @@ class Container:
         self.metas = [r.take(33) for _ in range(n_entries)]
         self.index = {cid: i for i, cid in enumerate(self.chunk_ids)}
         self._partitions = {}
+
+    def close(self):
+        for f in self._partitions.values():
+            f.close()
+        self._partitions.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
     def _partition(self, n):
         if n not in self._partitions:
