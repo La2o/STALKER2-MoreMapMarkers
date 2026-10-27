@@ -11,7 +11,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build import LIMIT_EXPORT_OFFSET  # noqa: E402
+from build import EXPORT_ENTRY_SIZE, SUMMARY_EXPORT_MAP, SUMMARY_HEADER_SIZE, read_limit  # noqa: E402
 from iostore import CHUNK_EXPORT_BUNDLE_DATA, Container, Reader, hash_chunk_id  # noqa: E402
 
 
@@ -58,7 +58,14 @@ def check(c):
         pid = struct.unpack("<Q", cid[:8])[0]
         assert pid in header["entries"], f"{path}: no store entry"
         pkg = c.read_chunk(entry)
-        limit = struct.unpack_from("<i", pkg, struct.unpack_from("<I", pkg, 4)[0] + LIMIT_EXPORT_OFFSET)[0]
+        export_start = struct.unpack_from("<I", pkg, SUMMARY_HEADER_SIZE)[0]
+        export_map, bundles = struct.unpack_from("<ii", pkg, SUMMARY_EXPORT_MAP)
+        assert bundles - export_map == EXPORT_ENTRY_SIZE, f"{path}: expected one export"
+        serial_size = struct.unpack_from("<Q", pkg, export_map + 8)[0]
+        # The export data is followed by the 4-byte package file tag.
+        assert export_start + serial_size + 4 == len(pkg), f"{path}: export size doesn't match the data"
+        limit = read_limit(pkg)
+        assert limit is not None, f"{path}: marker limit not set"
         print(f"{path}: marker limit = {limit}")
 
 

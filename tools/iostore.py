@@ -1,5 +1,5 @@
-"""Minimal reader/writer for Unreal Engine 5.1 IoStore containers, as used by
-S.T.A.L.K.E.R. 2 (.utoc TOC version 5, container header version 2).
+"""Minimal reader/writer for Unreal Engine IoStore containers, as used by
+S.T.A.L.K.E.R. 2 (.utoc TOC version 8, container header version 4).
 
 Reading handles everything the game's own containers use (Oodle blocks,
 multiple partitions, directory index, container header). Writing produces a
@@ -13,10 +13,12 @@ import zlib
 import blake3
 
 TOC_MAGIC = b"-==--==--==--==-"
-TOC_VERSION = 5  # PerfectHashWithOverflow
+TOC_VERSION = 8  # ReplaceIoChunkHashWithIoHash
+TOC_META_SIZE = 24  # FIoHash (20) + flags (1) + padding (3)
 TOC_HEADER_SIZE = 0x90
 CONTAINER_HEADER_MAGIC = 0x496F436E
-CONTAINER_HEADER_VERSION = 2  # OptionalSegmentPackages
+CONTAINER_HEADER_VERSION = 4  # SoftPackageReferences
+STORE_ENTRY_SIZE = 16  # imported packages + shader map hashes (no export info since v3)
 
 FLAG_COMPRESSED = 0x1
 FLAG_ENCRYPTED = 0x2
@@ -42,8 +44,8 @@ def chunk_id(object_id, chunk_type, index=0):
 
 
 def chunk_hash(data):
-    """FIoChunkHash: BLAKE3 truncated to 20 bytes, zero-padded to 32."""
-    return blake3.blake3(data).digest()[:20] + b"\0" * 12
+    """FIoHash: BLAKE3 truncated to 20 bytes."""
+    return blake3.blake3(data).digest()[:20]
 
 
 def hash_chunk_id(seed, cid):
@@ -129,7 +131,7 @@ class Container:
         n_seeds = r.u32()
         self.partition_size = r.u64()
         n_overflow = r.u32()
-        if self.version < 5 or block_entry_size != 12:
+        if self.version != TOC_VERSION or block_entry_size != 12:
             raise ValueError(f"{utoc_path}: unsupported TOC version {self.version}")
         if self.flags & FLAG_ENCRYPTED:
             raise ValueError(f"{utoc_path}: container is encrypted")
@@ -151,7 +153,9 @@ class Container:
             hash_size = r.i32()
             r.take(hash_size * 2 + 20 * n_blocks)
         self.directory = r.take(dir_size) if self.flags & FLAG_INDEXED else b""
-        self.metas = [r.take(33) for _ in range(n_entries)]
+        self.metas = [r.take(TOC_META_SIZE) for _ in range(n_entries)]
+        if r.pos != len(toc):
+            raise ValueError(f"{utoc_path}: {len(toc) - r.pos} unexpected bytes after the TOC")
         self.index = {cid: i for i, cid in enumerate(self.chunk_ids)}
         self._partitions = {}
 
@@ -202,7 +206,7 @@ class Container:
                 out += ooz.decompress(raw, usize)
         start = offset - first * self.block_size
         data = bytes(out[start : start + length])
-        if verify and chunk_hash(data)[:20] != self.metas[index][:20]:
+        if verify and chunk_hash(data) != self.metas[index][:20]:
             raise ValueError(f"{self.path}: hash mismatch on chunk {index}")
         return data
 
@@ -250,17 +254,18 @@ def parse_container_header(data):
     store = r.take(r.u32())
     entries = {}
     for i, pid in enumerate(package_ids):
-        base = i * 24
+        base = i * STORE_ENTRY_SIZE
         er = Reader(store, base)
-        export_count, bundle_count = er.i32(), er.i32()
         arrays = []
-        for field_off, item_size in ((8, 8), (16, 20)):
+        for field_off, item_size in ((0, 8), (8, 20)):
             n, rel = er.u32(), er.u32()
             start = base + field_off + rel
+            if n and start + n * item_size > len(store):
+                raise ValueError(f"store entry {i} points outside the store")
             arrays.append(store[start : start + n * item_size] if n else b"")
         imports = [struct.unpack_from("<Q", arrays[0], j * 8)[0] for j in range(len(arrays[0]) // 8)]
         shader_maps = [arrays[1][j * 20 : j * 20 + 20] for j in range(len(arrays[1]) // 20)]
-        entries[pid] = (export_count, bundle_count, imports, shader_maps)
+        entries[pid] = (imports, shader_maps)
     return {"container_id": container_id, "entries": entries}
 
 
@@ -271,17 +276,17 @@ def align(n, a=BLOCK_ALIGN):
 
 
 def write_container_header(container_id, entries):
-    """entries: {package_id: (export_count, bundle_count, imports, shader_maps)}"""
+    """entries: {package_id: (imports, shader_maps)}"""
     pids = list(entries)
     fixed = bytearray()
     tail = bytearray()
-    base_tail = 24 * len(pids)
+    base_tail = STORE_ENTRY_SIZE * len(pids)
     for i, pid in enumerate(pids):
-        export_count, bundle_count, imports, shader_maps = entries[pid]
-        entry = struct.pack("<ii", export_count, bundle_count)
-        for field_off, items in ((8, [struct.pack("<Q", x) for x in imports]), (16, shader_maps)):
+        imports, shader_maps = entries[pid]
+        entry = b""
+        for field_off, items in ((0, [struct.pack("<Q", x) for x in imports]), (8, shader_maps)):
             if items:
-                rel = base_tail + len(tail) - (i * 24 + field_off)
+                rel = base_tail + len(tail) - (i * STORE_ENTRY_SIZE + field_off)
                 entry += struct.pack("<II", len(items), rel)
                 tail += b"".join(items)
             else:
@@ -292,9 +297,9 @@ def write_container_header(container_id, entries):
     out += struct.pack("<I", len(pids)) + b"".join(struct.pack("<Q", p) for p in pids)
     out += struct.pack("<I", len(store)) + store
     out += struct.pack("<II", 0, 0)  # optional segment package ids, store entries
-    # Empty redirects name map: count, string bytes, hash version
-    out += struct.pack("<IIQ", 0, 0, 0xC1640000)
+    out += struct.pack("<I", 0)  # redirects name map (no names)
     out += struct.pack("<II", 0, 0)  # localized packages, package redirects
+    out += struct.pack("<I", 0)  # bContainsSoftPackageReferences
     return out
 
 
@@ -352,7 +357,7 @@ def perfect_hash(chunk_ids):
             if len(set(want)) == len(want) and all(slots[s] is None for s in want):
                 break
             seed += 1
-            if seed > 1_000_000:
+            if seed > 100_000:
                 raise RuntimeError("no perfect hash seed found")
         for s, c in zip(want, items):
             slots[s] = c
@@ -365,17 +370,27 @@ def write_container(base_path, name, mount_point, files, chunks):
 
     files:  [(path relative to mount point, chunk id)]
     chunks: {chunk id: (data, store entry)}; the store entry
-            (export_count, bundle_count, imports, shader_maps) is needed for
-            export bundle chunks and None otherwise. The container header
-            chunk is added here.
+            (imports, shader_maps) is needed for export bundle chunks and
+            None otherwise. The container header chunk is added here.
     """
-    container_id = struct.unpack("<Q", blake3.blake3(name.lower().encode("utf-16-le")).digest()[:8])[0]
-    if container_id == MASK64:
-        container_id -= 1
-    chunks = dict(chunks)
-    chunks[chunk_id(container_id, CHUNK_CONTAINER_HEADER)] = (b"", None)  # filled below
-
-    ids, seeds = perfect_hash(list(chunks))
+    # The container header chunk id is derived from the container id. With very
+    # few chunks a perfect hash may not exist for a given id (with 2 slots the
+    # slot is a parity bit the seed can't change), so salt the id until one does.
+    for salt in range(256):
+        key = name.lower() + (f"#{salt}" if salt else "")
+        container_id = struct.unpack("<Q", blake3.blake3(key.encode("utf-16-le")).digest()[:8])[0]
+        if container_id == MASK64:
+            container_id -= 1
+        trial = dict(chunks)
+        trial[chunk_id(container_id, CHUNK_CONTAINER_HEADER)] = (b"", None)  # filled below
+        try:
+            ids, seeds = perfect_hash(list(trial))
+            break
+        except RuntimeError:
+            continue
+    else:
+        raise RuntimeError("no perfect hash found for any container id")
+    chunks = trial
     slot = {cid: i for i, cid in enumerate(ids)}
 
     # The container header lists every package (export bundle chunk) we ship.
@@ -418,7 +433,7 @@ def write_container(base_path, name, mount_point, files, chunks):
     toc += b"".join(o.to_bytes(5, "little") + n.to_bytes(3, "little") * 2 + b"\0" for o, n in blocks)
     toc += b"".join(methods)
     toc += directory
-    toc += b"".join(chunk_hash(chunks[c][0]) + b"\0" for c in ids)
+    toc += b"".join(chunk_hash(chunks[c][0]) + b"\0" * 4 for c in ids)  # hash, flags, padding
 
     with open(base_path + ".utoc", "wb") as f:
         f.write(toc)

@@ -39,12 +39,18 @@ To uninstall, delete the three files.
 
 ## How it works
 
-The limit isn't a `.cfg` setting. It's an `int32` property on the cooked asset
-`/Game/GameLite/FPS_Game/UIRemaster/PDA/WorldMap/MapSettingsAsset`, at offset
-`0x94` into the package's export data.
+The limit isn't a `.cfg` setting. It's the `int32` property
+`PlayerLandmarksLimitTotal` on the cooked asset
+`/Game/GameLite/FPS_Game/UIRemaster/PDA/WorldMap/MapSettingsAsset`.
 
-- `tools/iostore.py` is a small reader and writer for UE 5.1 IoStore
-  containers (TOC v5, container header v2). It reads the game's
+The asset uses unversioned property serialization, which leaves out any
+property that equals the class default. In the current game the limit is at
+its default (10), so it isn't in the asset at all. The build adds it to the
+property header, inserts the value after the property before it, and updates
+the export's size in the export map.
+
+- `tools/iostore.py` is a small reader and writer for the IoStore containers
+  the current game uses (TOC v8, container header v4). It reads the game's
   Oodle-compressed containers through `pyooz`. It writes an uncompressed
   container with:
   - BLAKE3 chunk hashes;
@@ -52,7 +58,7 @@ The limit isn't a `.cfg` setting. It's an `int32` property on the cooked asset
   - a directory index and container header;
   - the empty `.pak` that UE needs to mount the container.
 - `tools/build.py` finds the asset in the game's containers and checks that
-  the field holds the vanilla value (10). It then writes the new limit and
+  its properties have the expected layout. It then sets the new limit and
   packs the container.
 - `tools/verify.py` reads a container back the way the engine does: chunk
   lookup, hashes, directory, container header and the limit itself.
@@ -62,5 +68,6 @@ The limit isn't a `.cfg` setting. It's an `int32` property on the cooked asset
 
 The mod replaces the whole `MapSettingsAsset`, using the copy from the game
 version you built it from. Rebuild after a game patch that changes the asset.
-The build stops with an error if the field no longer holds 10 at the expected
-offset. Any other mod that overrides this asset will conflict with this one.
+The build stops with an error if the asset's properties no longer have the
+expected layout. Any other mod that overrides this asset will conflict with
+this one.
