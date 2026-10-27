@@ -64,10 +64,18 @@ the export's size in the export map.
   lookup, hashes, directory, container header and the limit itself.
 - `tests/` round-trips a synthetic container: `python -m unittest discover tests`.
 
+The formats are written up in [`docs/FORMAT.md`](docs/FORMAT.md).
+
 ## Compatibility
 
 The mod replaces the whole `MapSettingsAsset`, using the copy from the game
 version you built it from. Rebuild after a game patch that changes the asset.
 The build stops with an error if the asset's properties no longer have the
-expected layout. Any other mod that overrides this asset will conflict with
+expected layout. [`docs/UPDATING.md`](docs/UPDATING.md) explains what to check
+when that happens. Any other mod that overrides this asset will conflict with
 this one.
+
+## License
+
+The code is under the [MIT license](LICENSE.md). Game files aren't included and
+aren't covered by it.
